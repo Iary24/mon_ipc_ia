@@ -20,6 +20,7 @@ document/
 *.RData
 *.dta
 
+
 # --- FICHIERS D'ENVIRONNEMENT & CLÉS SÉCURITÉ ---
 .Renviron
 .Rprofile
