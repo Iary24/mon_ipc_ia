@@ -1,3 +1,0 @@
-﻿Approche,Formule CR_i,Avantage,Inconvénient
-Actuelle,C_i / π_global × 100,Cohérent avec le taux affiché,Somme ≠ 100
-Normalisée,C_i / Σ(C_i) × 100,Somme = 100 par construction,Légèrement découplé de π_global

@@ -1,9 +1,0 @@
-﻿Fichier,Rôle
-global.R,"Packages, constantes, 4 fonctions partagées, chargement initial du RDS"
-ui.R,"page_navbar bslib avec 5 onglets, source les modules"
-server.R,reactiveVal central + 4 dérivés réactifs + appel des modules
-module/mod_import.R,"Import Excel, validation, mise à jour RDS, aperçu"
-module/mod_ipc_global.R,3 value boxes + courbe IPC
-module/mod_inflation.R,"3 onglets : moyenne annuelle, glissement, comparaison"
-module/mod_contributions.R,Sélecteurs catégorie/horizon/type + barres horizontales
-module/mod_stl.R,Paramètres STL interactifs + facettes
