@@ -1,6 +1,42 @@
-.Rproj.user
+# --- DONNÉES & FICHIERS LOURDS ---
+data/
+*.csv
+*.xlsx
+*.rds
+*.RData
+*.dta
+
+output/
+*.csv
+*.xlsx
+*.rds
+*.RData
+*.dta
+
+document/
+*.csv
+*.xlsx
+*.rds
+*.RData
+*.dta
+
+# --- FICHIERS D'ENVIRONNEMENT & CLÉS SÉCURITÉ ---
+.Renviron
+.Rprofile
+.httr-oauth
+*.secret
+
+# --- FICHIERS TEMPORAIRES RSTUDIO & QUARTO ---
+.Rproj.user/
 .Rhistory
 .RData
 .httr-oauth
+.quarto/
+*_cache/
+*_files/
+
+
+# --- FICHIERS SYSTÈME OPERATIF (macOS) ---
 .DS_Store
+.Rproj.user
 .quarto
