@@ -1,0 +1,328 @@
+# =============================================================================
+# module/mod_carte.R — Cartographie spatiale de l'IPC par zone d'enquête
+# =============================================================================
+# Deux cartes de Madagascar côte à côte :
+#   Carte 1 : Taux d'inflation par zone (glissement annuel ou variation moy.)
+#             Échelle divergente bleu–blanc–rouge (0 = blanc, inflation = rouge)
+#   Carte 2 : Contribution relative de chaque zone (% du total)
+#             Échelle séquentielle jaune–orange–rouge
+#
+# Filtre utilisateur : Mensuel (mois×année) ou Annuel (année)
+# Les zones sont les 7 villes d'enquête de l'IPC (provinces_coord dans global.R)
+
+# -----------------------------------------------------------------------------
+# UI
+# -----------------------------------------------------------------------------
+
+mod_carte_ui <- function(id) {
+  ns <- NS(id)
+
+  tagList(
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 250,
+        title = "Paramètres",
+
+        radioButtons(
+          ns("horizon"),
+          "Type de période",
+          choices  = c("Mensuel (glissement annuel)" = "mensuel",
+                       "Annuel (moyenne annuelle)"   = "annuel"),
+          selected = "mensuel"
+        ),
+
+        uiOutput(ns("ui_periode")),
+
+        hr(),
+
+        p(class = "text-muted small",
+          "Le taux est calculé par rapport à la même période de l'année précédente.",
+          br(),
+          "La contribution relative mesure la part de chaque zone dans la somme des taux.")
+      ),
+
+      layout_column_wrap(
+        width = 1 / 2,
+
+        card(
+          full_screen = TRUE,
+          card_header(
+            bs_icon("thermometer-half"), " Taux d'inflation par zone (%)"
+          ),
+          girafeOutput(ns("carte_inflation"), width = "100%", height = "auto")
+        ),
+
+        card(
+          full_screen = TRUE,
+          card_header(
+            bs_icon("pie-chart-fill"), " Contribution relative par zone (%)"
+          ),
+          girafeOutput(ns("carte_contribution"), width = "100%", height = "auto")
+        )
+      )
+    )
+  )
+}
+
+# -----------------------------------------------------------------------------
+# Helpers internes
+# -----------------------------------------------------------------------------
+
+# Calcule taux d'inflation et contribution relative à partir de ipc_geo
+.calc_taux_geo <- function(ipc_geo, horizon, periode) {
+  df <- ipc_geo |> arrange(libelle, date)
+
+  if (horizon == "mensuel") {
+    # Glissement annuel (lag 12) pour la date sélectionnée
+    date_sel <- as.Date(periode)
+
+    df <- df |>
+      group_by(libelle) |>
+      mutate(ipc_lag12 = lag(ipc, 12)) |>
+      ungroup() |>
+      filter(date == date_sel, !is.na(ipc_lag12)) |>
+      mutate(taux = (ipc / ipc_lag12 - 1) * 100)
+
+  } else {
+    # Variation de la moyenne annuelle
+    annee_sel <- as.integer(periode)
+
+    moyennes <- df |>
+      mutate(annee = lubridate::year(date)) |>
+      group_by(libelle, annee) |>
+      filter(n() == 12) |>
+      summarise(ipc_moy = mean(ipc), .groups = "drop")
+
+    df <- moyennes |>
+      group_by(libelle) |>
+      mutate(ipc_moy_lag = lag(ipc_moy)) |>
+      ungroup() |>
+      filter(annee == annee_sel, !is.na(ipc_moy_lag)) |>
+      mutate(taux = (ipc_moy / ipc_moy_lag - 1) * 100)
+  }
+
+  if (nrow(df) == 0) return(NULL)
+
+  # Contribution relative : part de chaque zone dans la somme des taux absolus
+  # (convention robuste aux cas mixtes inflation/déflation)
+  somme_abs <- sum(abs(df$taux), na.rm = TRUE)
+
+  df |>
+    mutate(
+      contrib_rel = if (somme_abs > 0) taux / somme_abs * 100 else NA_real_
+    ) |>
+    select(libelle, taux, contrib_rel)
+}
+
+# Fond de carte commun : polygone Madagascar depuis map_data (package maps)
+.base_map <- function() {
+  list(
+    geom_polygon(
+      data        = madagascar_map,
+      aes(x = long, y = lat, group = group),
+      fill        = "#F0F0F0",
+      colour      = "#AAAAAA",
+      linewidth   = 0.3,
+      inherit.aes = FALSE
+    )
+  )
+}
+
+# Construit une carte girafe : fond polygone + bulles interactives colorées.
+.carte_girafe <- function(df, col_valeur, titre_legende,
+                          palette_type = c("divergente", "sequentielle"),
+                          periode_label) {
+  palette_type <- match.arg(palette_type)
+
+  # Limites calées sur la plage réelle des données
+  val_min <- min(df[[col_valeur]], na.rm = TRUE)
+  val_max <- max(df[[col_valeur]], na.rm = TRUE)
+  marge   <- (val_max - val_min) * 0.08   # 8 % de marge visuelle
+
+  p <- ggplot() +
+    .base_map() +
+    geom_point_interactive(
+      data  = df,
+      aes(
+        x       = lon,
+        y       = lat,
+        fill    = .data[[col_valeur]],
+        size    = abs(.data[[col_valeur]]),
+        tooltip = paste0(
+          "<b>", libelle, "</b><br/>",
+          titre_legende, " : ",
+          sprintf("%+.2f%%", .data[[col_valeur]])
+        ),
+        data_id = libelle
+      ),
+      shape  = 21,
+      colour = "white",
+      stroke = 0.6
+    ) +
+    geom_text(
+      data   = df,
+      aes(x = lon, y = lat, label = libelle),
+      vjust  = -1.3,
+      size   = 2.8,
+      colour = "grey25"
+    ) +
+    scale_size_continuous(range = c(5, 16), guide = "none") +
+    coord_quickmap()
+
+  if (palette_type == "divergente") {
+    # On inclut toujours 0 dans les limites (ancrage sémantique du point médian) ;
+    # la palette s'étend ensuite jusqu'aux valeurs extrêmes réelles.
+    lim_low  <- min(val_min - marge, 0)
+    lim_high <- max(val_max + marge, 0)
+
+    p <- p + scale_fill_gradient2(
+      low      = "#2166AC",
+      mid      = "#F7F7F7",
+      high     = "#D73027",
+      midpoint = 0,
+      limits   = c(lim_low, lim_high),
+      name     = titre_legende,
+      labels   = scales::label_percent(scale = 1, suffix = "%")
+    )
+  } else {
+    p <- p + scale_fill_distiller(
+      palette   = "YlOrRd",
+      direction = 1,
+      limits    = c(val_min - marge, val_max + marge),
+      name      = titre_legende,
+      labels    = scales::label_percent(scale = 1, suffix = "%")
+    )
+  }
+
+  p +
+    labs(
+      subtitle = periode_label,
+      caption  = "Source : INSTAT/DSCVM/IPC"
+    ) +
+    theme_void(base_size = 11) +
+    theme(
+      legend.position  = "bottom",
+      legend.key.width = unit(1.8, "cm"),
+      plot.subtitle    = element_text(hjust = 0.5, colour = "grey40", size = 10),
+      plot.caption     = element_text(hjust = 1, colour = "grey60",  size = 8)
+    )
+}
+
+# -----------------------------------------------------------------------------
+# Server
+# -----------------------------------------------------------------------------
+
+mod_carte_server <- function(id, ipc_geo_rv) {
+  moduleServer(id, function(input, output, session) {
+
+    # --- Sélecteur de période dynamique ------------------------------------
+    output$ui_periode <- renderUI({
+      df <- ipc_geo_rv()
+      req(df)
+
+      if (input$horizon == "mensuel") {
+        # Dates disponibles à partir du 13e mois (lag 12 calculable)
+        dates_dispo <- df |>
+          group_by(libelle) |>
+          arrange(date) |>
+          mutate(ipc_lag12 = lag(ipc, 12)) |>
+          ungroup() |>
+          filter(!is.na(ipc_lag12)) |>
+          pull(date) |>
+          unique() |>
+          sort(decreasing = TRUE)
+
+        selectInput(
+          session$ns("periode"),
+          "Mois",
+          choices  = setNames(
+            as.character(dates_dispo),
+            format(dates_dispo, "%B %Y")
+          ),
+          selected = as.character(dates_dispo[1])
+        )
+      } else {
+        # Années complètes pour les deux années consécutives nécessaires
+        annees <- df |>
+          mutate(annee = lubridate::year(date)) |>
+          group_by(libelle, annee) |>
+          filter(n() == 12) |>
+          ungroup() |>
+          pull(annee) |>
+          unique() |>
+          sort(decreasing = TRUE)
+
+        # Retirer la première (plus ancienne) car on a besoin de N-1
+        annees_dispo <- head(annees, -1)
+
+        selectInput(
+          session$ns("periode"),
+          "Année",
+          choices  = annees_dispo,
+          selected = annees_dispo[1]
+        )
+      }
+    })
+
+    # --- Données calculées -------------------------------------------------
+    donnees_carte <- reactive({
+      df <- ipc_geo_rv()
+      req(df, input$periode)
+
+      .calc_taux_geo(df, input$horizon, input$periode)
+    })
+
+    # Jonction données × coordonnées (tibble simple lon/lat)
+    sf_carte <- reactive({
+      dc <- donnees_carte()
+      req(dc, nrow(dc) > 0)
+
+      provinces_coord |>
+        left_join(dc, by = "libelle") |>
+        filter(!is.na(taux))
+    })
+
+    # Label de période pour les sous-titres
+    periode_label <- reactive({
+      req(input$periode)
+      if (input$horizon == "mensuel") {
+        paste("Glissement annuel —", format(as.Date(input$periode), "%B %Y"))
+      } else {
+        paste("Variation de la moyenne annuelle —", input$periode)
+      }
+    })
+
+    # --- Carte 1 : Taux d'inflation ----------------------------------------
+    output$carte_inflation <- renderGirafe({
+      df <- sf_carte()
+      req(nrow(df) > 0)
+
+      p <- .carte_girafe(
+        df            = df,
+        col_valeur    = "taux",
+        titre_legende = "Taux (%)",
+        palette_type  = "divergente",
+        periode_label = periode_label()
+      )
+
+      girafe(ggobj = p, width_svg = 5, height_svg = 5.5, options = girafe_opts())
+      
+    })
+
+    # --- Carte 2 : Contribution relative -----------------------------------
+    output$carte_contribution <- renderGirafe({
+      df <- sf_carte()
+      req(nrow(df) > 0)
+
+      p <- .carte_girafe(
+        df            = df,
+        col_valeur    = "contrib_rel",
+        titre_legende = "Part (%)",
+        palette_type  = "sequentielle",
+        periode_label = periode_label()
+      )
+
+      girafe(ggobj = p, width_svg = 5, height_svg = 5.5, options = girafe_opts())
+    })
+  })
+}

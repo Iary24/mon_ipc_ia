@@ -1,0 +1,6 @@
+﻿Fichier,Changement
+global.R,library(ggiraph) + fonction girafe_opts() partagée (style CSS cohérent)
+mod_ipc_global.R,Courbes : points alpha = 0 invisibles sur le trait pour tooltip par mois
+mod_inflation.R,geom_col_interactive() sur les 3 graphiques de barres
+mod_contributions.R,geom_col_interactive() — tooltip avec valeur à 4 décimales
+mod_stl.R,Points alpha = 0 par facette × date
